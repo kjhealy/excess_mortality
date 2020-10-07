@@ -54,9 +54,7 @@ states <- nchs_wdc %>%
 
 ```
 
-# Counting Excess Deaths in the United States as a Whole
-
-# Counting Excess Deaths in the United States as a Whole
+# Counting Excess Deaths by Jurisdiction
 
 - CDC data, using March 1 to Sept 1 (Epi weeks 9 to 34) as the period.
 
@@ -66,7 +64,7 @@ start_week <- 9
 end_week <- 34
 
 df_yr <- nchs_wdc %>%
-  filter(jurisdiction == "United States") %>% 
+#  filter(jurisdiction == "United States") %>% 
   filter(year > 2014,
          week >= start_week & 
          week <= end_week) %>% 
@@ -75,7 +73,7 @@ df_yr <- nchs_wdc %>%
 
 
 baseline_deaths <- nchs_wdc %>% 
-  filter(jurisdiction == "United States") %>% 
+  #filter(jurisdiction == "United States") %>% 
   filter(year %in% c(2015:2019),
          week >= start_week & 
          week <= end_week) %>%
@@ -87,9 +85,57 @@ baseline_deaths <- nchs_wdc %>%
 
 df_excess <- left_join(df_yr, baseline_deaths) %>%
   mutate(excess = period_deaths - baseline, 
-         pct_excess = (excess / period_deaths)*100) %>%
+         pct_excess = (excess / period_deaths)*100, 
+         pct_sd = (baseline_sd/baseline)*100) %>%
   rename(deaths = period_deaths)
 
+df_meds <- df_excess %>%
+  summarize(med = median(pct_excess))
+
+df_sd <- df_excess %>%
+  filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
+  group_by(cause) %>% 
+  slice(1) %>%
+  select(cause, pct_sd) %>%
+  mutate(lwr = -2*pct_sd, 
+         upr = 2*pct_sd) %>%
+  left_join(df_meds)
+
+df_excess %>% filter(jurisdiction == "United States")
+
+```
+
+```{r}
+out <- df_excess %>% 
+  filter(jurisdiction == "United States") %>%
+  filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
+  mutate(yr_ind = ifelse(year == 2020, TRUE, FALSE)) %>%
+  ggplot(aes(x = pct_excess/100, y = reorder(cause, pct_excess, median), color = yr_ind, group = year)) + 
+  geom_linerange(data = df_sd, mapping = aes(xmin = lwr/100, xmax = upr/100, y = reorder(cause, med)), 
+                 color = "deepskyblue1", alpha = 0.4, inherit.aes = FALSE, size = 3) + 
+  geom_vline(xintercept = 0, color = "black") + 
+  geom_jitter(size = 2, position = position_jitter(height = 0.05)) +
+  scale_color_manual(values = c("gray50", "firebrick"), 
+                     labels = c("2015-2019", "2020")) + 
+  scale_x_continuous(breaks = c(-10, -5, 0, 5, 10, 15, 20)/100, labels = scales::percent_format(accuracy = 1)) + 
+  labs(x = "Percent above or below the average number of deaths for 2015 to 2019", 
+       y = NULL, 
+       color = "Years", 
+       title = "Excess Deaths in the U.S. from March 1st to September 1st",
+       subtitle = "Selected Causes, arranged by median excess deaths.",
+       caption = "Data: CDC. Calculations and Graph: @kjhealy")
+
+
+
+print(out)
+ggsave(filename = "figures/excess_by_cause.pdf", out, height = 4.25, width = 7)
+ggsave(filename = "figures/excess_by_cause.png", out, height = 4.25, width = 7)
+
+```
+
+
+
+```{r}
 excess_count <- df_excess %>%
   filter(year == 2020 &
            cause %in% c("All Cause", "COVID-19 Multiple cause")) 
@@ -112,69 +158,15 @@ excess_table <- excess_table %>%
          pct_deficit = (deficit / all_cause) * 100) %>%
   select(jurisdiction, all_cause, baseline, baseline_sd, excess, covid, deficit, everything()) 
 
-excess_table 
+excess_table %>% 
+  filter(jurisdiction == "United States") %>%
+  pivot_longer( all_cause:pct_deficit, names_to = "measure", values_to = "value")
 
 ```
 
 # State Level Pictures
 
 - CDC data, using March 1 to Sept 1 (Epi weeks 9 to 34) as the period.
-
-```{r}
-
-start_week <- 9
-end_week <- 34
-
-df_yr <- nchs_wdc %>%
-  filter(jurisdiction != "United States") %>% 
-  filter(year > 2014,
-         week >= start_week & 
-         week <= end_week) %>% 
-  group_by(jurisdiction, cause, year) %>%
-  summarize(period_deaths = sum(n, na.rm = TRUE)) 
-
-
-baseline_deaths <- nchs_wdc %>% 
-  filter(jurisdiction != "United States") %>% 
-  filter(year %in% c(2015:2019),
-         week >= start_week & 
-         week <= end_week) %>%
-  group_by(jurisdiction, year, cause) %>%
-  summarize(total_n = sum(n, na.rm = TRUE)) %>%
-  group_by(jurisdiction, cause) %>%
-  summarize(baseline = mean(total_n, na.rm = TRUE), 
-            baseline_sd = sd(total_n, na.rm = TRUE)) 
-
-df_excess <- left_join(df_yr, baseline_deaths) %>%
-  mutate(excess = period_deaths - baseline, 
-         pct_excess = (excess / period_deaths)*100) %>%
-  rename(deaths = period_deaths)
-
-excess_count <- df_excess %>%
-  filter(year == 2020 &
-           cause %in% c("All Cause", "COVID-19 Multiple cause")) 
-
-excess_table <- excess_count %>%
-  mutate(col_cause = janitor::make_clean_names(cause)) %>%
-  select(jurisdiction, col_cause, deaths:pct_excess) %>%
-  group_by(jurisdiction) %>%
-  select(-cause) %>%
-  pivot_wider(names_from = col_cause, values_from = deaths:pct_excess) %>%
-  select(-pct_excess_covid_19_multiple_cause, -excess_covid_19_multiple_cause, -baseline_covid_19_multiple_cause, 
-         -baseline_sd_covid_19_multiple_cause)
-
-colnames(excess_table) <- c("jurisdiction", "all_cause", "covid", "baseline", "baseline_sd", "excess", "pct_excess")
-
-
-excess_table <- excess_table %>%
-  mutate(deficit = excess - covid, 
-         pct_covid = (covid / all_cause) * 100, 
-         pct_deficit = (deficit / all_cause) * 100) %>%
-  select(jurisdiction, all_cause, baseline, baseline_sd, excess, covid, deficit, everything()) 
-
-excess_table
-
-```
 
 ```{r, fig.width = 7, fig.height=7}
 library(ggalt)
@@ -260,83 +252,4 @@ knitr::kable(excess_table, digits = 2)
   
 ```
 
-
-## By Cause, National
-
-```{r}
-
-df_yr <- nchs_wdc %>%
-  filter(jurisdiction == "United States") %>%
-  filter(year > 2014, 
-         week >= 9 & 
-         week <= 34) %>% 
-  group_by(cause, year) %>%
-  summarize(period_deaths = sum(n, na.rm = TRUE)) 
-
-
-baseline_deaths <- nchs_wdc %>% 
-  filter(jurisdiction == "United States") %>%
-  filter(year %in% c(2015:2019),
-         week >= 9 & 
-         week <= 34) %>%
-  group_by(year, cause) %>%
-  summarize(total_n = sum(n, na.rm = TRUE)) %>%
-  group_by(cause) %>%
-  summarize(baseline = mean(total_n, na.rm = TRUE), 
-            baseline_sd = sd(total_n, na.rm = TRUE)) 
-
-df_excess <- left_join(df_yr, baseline_deaths) %>%
-  mutate(excess = period_deaths - baseline, 
-         pct_excess = (excess / period_deaths)*100,
-         pct_sd = (baseline_sd/baseline)*100) %>%
-  rename(deaths = period_deaths)
-
-df_meds <- df_excess %>%
-  summarize(med = median(pct_excess))
-
-df_sd <- df_excess %>%
-  filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
-  group_by(cause) %>% 
-  slice(1) %>%
-  select(cause, pct_sd) %>%
-  mutate(lwr = -2*pct_sd, 
-         upr = 2*pct_sd) %>%
-  left_join(df_meds)
-            
-out <- df_excess %>% 
-  filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
-  mutate(yr_ind = ifelse(year == 2020, TRUE, FALSE)) %>%
-  ggplot(aes(x = pct_excess/100, y = reorder(cause, pct_excess, median), color = yr_ind, group = year)) + 
-  geom_linerange(data = df_sd, mapping = aes(xmin = lwr/100, xmax = upr/100, y = reorder(cause, med)), 
-                 color = "deepskyblue1", alpha = 0.4, inherit.aes = FALSE, size = 3) + 
-  geom_vline(xintercept = 0, color = "black") + 
-  geom_jitter(size = 2, position = position_jitter(height = 0.05)) +
-  scale_color_manual(values = c("gray50", "firebrick"), 
-                     labels = c("2015-2019", "2020")) + 
-  scale_x_continuous(breaks = c(-10, -5, 0, 5, 10, 15, 20)/100, labels = scales::percent_format(accuracy = 1)) + 
-  labs(x = "Percent above or below the average number of deaths for 2015 to 2019", 
-       y = NULL, 
-       color = "Years", 
-       title = "Excess Deaths in the U.S. from March 1st to September 1st",
-       subtitle = "Selected Causes, arranged by median excess deaths.",
-       caption = "Data: CDC. Calculations and Graph: @kjhealy")
-
-
-
-print(out)
-ggsave(filename = "figures/excess_by_cause.pdf", out, height = 4.25, width = 7)
-ggsave(filename = "figures/excess_by_cause.png", out, height = 4.25, width = 7)
-
-```
-
-
-```{r}
-
-
-df_yr <- nchs_wdc %>%
-  filter(year %in% c(2019)) %>%
-  group_by(cause, year) %>%
-  summarize(period_deaths = sum(n, na.rm = TRUE)) 
-
-```
 
