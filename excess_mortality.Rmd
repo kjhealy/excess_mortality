@@ -56,15 +56,14 @@ states <- nchs_wdc %>%
 
 # Counting Excess Deaths by Jurisdiction
 
-- CDC data, using March 1 to Sept 1 (Epi weeks 9 to 34) as the period.
+- CDC data, using March 1 to Nov 7th (Epi weeks 9 to 45) as the period.
 
 ```{r}
 
 start_week <- 9
-end_week <- 34
+end_week <- 45
 
 df_yr <- nchs_wdc %>%
-#  filter(jurisdiction == "United States") %>% 
   filter(year > 2014,
          week >= start_week & 
          week <= end_week) %>% 
@@ -73,7 +72,6 @@ df_yr <- nchs_wdc %>%
 
 
 baseline_deaths <- nchs_wdc %>% 
-  #filter(jurisdiction == "United States") %>% 
   filter(year %in% c(2015:2019),
          week >= start_week & 
          week <= end_week) %>%
@@ -92,37 +90,39 @@ df_excess <- left_join(df_yr, baseline_deaths) %>%
 df_meds <- df_excess %>%
   summarize(med = median(pct_excess))
 
+```
+
+```{r}
+
 df_sd <- df_excess %>%
   filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
-  group_by(cause) %>% 
-  slice(1) %>%
-  select(cause, pct_sd) %>%
+  select(jurisdiction, cause, pct_sd) %>%
+  slice(1) %>% 
   mutate(lwr = -2*pct_sd, 
          upr = 2*pct_sd) %>%
   left_join(df_meds)
 
-df_excess %>% filter(jurisdiction == "United States")
-
-```
-
-```{r}
 out <- df_excess %>% 
   filter(jurisdiction == "United States") %>%
   filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
   mutate(yr_ind = ifelse(year == 2020, TRUE, FALSE)) %>%
-  ggplot(aes(x = pct_excess/100, y = reorder(cause, pct_excess, median), color = yr_ind, group = year)) + 
-  geom_linerange(data = df_sd, mapping = aes(xmin = lwr/100, xmax = upr/100, y = reorder(cause, med)), 
-                 color = "deepskyblue1", alpha = 0.4, inherit.aes = FALSE, size = 3) + 
+  ggplot(aes(x = pct_excess/100, y = reorder(cause, pct_excess, median), color = yr_ind, shape = yr_ind, group = year)) + 
+  geom_linerange(data = subset(df_sd, jurisdiction == "United States"), 
+                 mapping = aes(xmin = lwr/100, xmax = upr/100, y = reorder(cause, med)), 
+                 color = "lightblue1", alpha = 0.7, inherit.aes = FALSE, size = 3) + 
   geom_vline(xintercept = 0, color = "black") + 
   geom_jitter(size = 2, position = position_jitter(height = 0.05)) +
   scale_color_manual(values = c("gray50", "firebrick"), 
                      labels = c("2015-2019", "2020")) + 
+ scale_shape_manual(values = c(16, 17),
+                    labels = c("2015-2019", "2020")) +  
   scale_x_continuous(breaks = c(-10, -5, 0, 5, 10, 15, 20)/100, labels = scales::percent_format(accuracy = 1)) + 
   labs(x = "Percent above or below the average number of deaths for 2015 to 2019", 
        y = NULL, 
        color = "Years", 
-       title = "Excess Deaths in the U.S. from March 1st to September 1st",
-       subtitle = "Selected Causes, arranged by median excess deaths.",
+       shape = "Years",
+       title = "Excess Deaths in the U.S. from March 1st to November 7th",
+       subtitle = "Selected Causes. Individual deaths may be due to more than one cause.",
        caption = "Data: CDC. Calculations and Graph: @kjhealy")
 
 
@@ -166,7 +166,7 @@ excess_table %>%
 
 # State Level Pictures
 
-- CDC data, using March 1 to Sept 1 (Epi weeks 9 to 34) as the period.
+- CDC data, using March 1 to November 7 (Epi weeks 9 to 45) as the period.
 
 ```{r, fig.width = 7, fig.height=7}
 library(ggalt)
@@ -251,5 +251,123 @@ excess_table %>%
 knitr::kable(excess_table, digits = 2) 
   
 ```
+
+
+### State Level
+
+```{r}
+
+df_state_meds <- df_excess %>%
+  summarize(med = median(pct_excess))
+
+df_state_sd <- df_excess %>%
+  filter(cause %nin% c("COVID-19 Underlying", "COVID-19 Multiple cause", "Other")) %>%
+  group_by(jurisdiction, cause) %>% 
+  slice(1) %>%
+  select(cause, pct_sd) %>%
+  mutate(lwr = -2*pct_sd, 
+         upr = 2*pct_sd) %>%
+  left_join(df_state_meds)
+
+
+
+df_state_excess <- left_join(df_excess, df_state_sd)
+
+out <- df_state_excess %>% 
+   filter(cause %in% c("Alzheimer's", 
+                       "Diabetes", 
+                       "Influenza and Pneumonia", 
+                       "Cerebrovascular Diseases", 
+                       "Diseases of the Heart", 
+                       "Cancer", "Chronic Lower Respiratory Diseases",
+                       "All Cause")) %>% 
+   filter(jurisdiction %in% c("United States", "New York", 
+                              "New York City", "New Jersey", 
+                              "Florida", "Michigan", "Washington",
+                              "Virginia", "Arizona",
+                              "California", "Pennsylvania", 
+                              "Georgia", "Ohio", 
+                              "Illinois")) %>% 
+  mutate(yr_ind = ifelse(year == 2020, TRUE, FALSE)) %>%
+  ggplot(aes(x = pct_excess/100, 
+             y = reorder(jurisdiction, pct_excess), 
+             color = yr_ind, shape = yr_ind, group = year)) + 
+  geom_linerange(mapping = aes(xmin = lwr/100, 
+                               xmax = upr/100, 
+                               y = reorder(jurisdiction, pct_excess, mean, na.rm = TRUE)), 
+                 color = "lightblue1", alpha = 0.7, size = 3) + 
+  geom_vline(xintercept = 0, color = "black") + 
+  geom_jitter(size = 2, position = position_jitter(height = 0.05)) +
+  scale_color_manual(values = c("gray50", "firebrick"), 
+                     labels = c("2015-2019", "2020")) + 
+  scale_shape_manual(values = c(16, 17),
+                      labels = c("2015-2019", "2020")) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) + 
+  guides(shape = guide_legend(keywidth = 0.15), 
+         color = guide_legend(keywidth = 0.15)) + 
+  labs(x = "Percent above or below the average number of deaths, Mar 1 to Nov 7 2015-2019", 
+       y = NULL, 
+       color = "Years",
+       shape = "Years",
+       title = "  Excess deaths for selected jurisdictions and causes, March 1st to November 7th",
+       subtitle = "  Blue bars show +/- 2 standard deviations around the 2015-2019 mean for each cause. Individual deaths may be recorded as having more than one cause.",
+       caption = "Data: CDC. Calculations and Graph: Kieran Healy / @kjhealy") +
+ facet_wrap(~reorder(cause, -pct_excess), ncol = 2) 
+
+
+out <- out + theme(strip.text = element_text(size = rel(1.1), hjust = 0), 
+          legend.justification = "left", 
+          panel.border  = element_rect(color = "gray90", size = rel(0.8), linetype="solid", fill = NA),
+          axis.text.y = element_text(face = c(rep("plain", 5), "bold", rep("plain", 6))))
+
+
+
+ggsave(filename = "figures/excess_by_cause_jurisdictions.pdf", out, height = 12, width = 12)
+ggsave(filename = "figures/excess_by_cause_jurisdictions.png", out, height = 12, width = 12, dpi = 200)
+
+```
+
+```{r}
+
+out <- df_state_excess %>% 
+   filter(cause %in% c("All Cause")) %>% 
+  mutate(yr_ind = ifelse(year == 2020, TRUE, FALSE)) %>%
+  ggplot(aes(x = pct_excess/100, 
+             y = reorder(jurisdiction, deaths), 
+             color = yr_ind, shape = yr_ind, group = year)) + 
+  geom_linerange(mapping = aes(xmin = lwr/100, 
+                               xmax = upr/100, 
+                               y = reorder(jurisdiction, deaths, mean, na.rm = TRUE)), 
+                 color = "lightblue1", alpha = 0.7, size = 3) + 
+  geom_vline(xintercept = 0, color = "black") + 
+  geom_jitter(size = 2, position = position_jitter(height = 0.05)) +
+  scale_color_manual(values = c("gray50", "firebrick"), 
+                     labels = c("2015-2019", "2020")) + 
+  scale_shape_manual(values = c(16, 17),
+                      labels = c("2015-2019", "2020")) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), 
+                     breaks = seq(-0.2, 0.5, 0.1), 
+                     position = "top") + 
+  guides(shape = guide_legend(keywidth = 0.15), 
+         color = guide_legend(keywidth = 0.15)) + 
+  labs(x = "   Percent above or below the average number of deaths, March 1st to November 7th 2015-2019", 
+       y = NULL, 
+       color = "Years",
+       shape = "Years",
+       title = "  All-Cause Excess Mortality by Jurisdiction, March 1st to November 7th",
+       subtitle = "  Blue bars show +/- 2 standard deviations around the 2015-2019 mean.\n  Jurisdictions ordered from highest to lowest all-cause mortality count.\n  The low NC and WV counts are an artifact of reporting delays.",
+       caption = "Data: CDC. Calculations and Graph: Kieran Healy / @kjhealy") 
+
+out <- out + theme(legend.justification = "left", 
+          panel.border  = element_rect(color = "gray90", size = rel(0.8), linetype="solid", fill = NA),
+          axis.text.y = element_text(face = c(rep("plain", 53), "bold")), 
+          axis.title.x = element_text(hjust = 0, size = rel(0.9)), 
+          plot.title = element_text(size = rel(1.35)))
+
+ggsave(filename = "figures/excess_all_cause_by_jurisdiction.pdf", out, height = 11, width = 8)
+ggsave(filename = "figures/excess_all_cause_by_jurisdiction.png", out, height = 11, width = 8, dpi = 200)
+
+```
+
 
 
